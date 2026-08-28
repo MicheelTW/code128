@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code 128 第20碼驗證碼與條碼產生器</title>
+    <!-- 引入 html5-qrcode 程式庫 -->
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            padding: 20px;
+            background-color: #f4f6f9;
+            margin: 0;
+        }
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+        }
+        h2 {
+            font-size: 20px;
+            margin-top: 0;
+            color: #1a252f;
+            text-align: center;
+        }
+        
+        /* 手動輸入區塊 */
+        .input-group {
+            margin-bottom: 20px;
+        }
+        .input-group label {
+            display: block;
+            font-size: 14px;
+            font-weight: bold;
+            margin-bottom: 6px;
+            color: #333;
+        }
+        .input-row {
+            display: flex;
+            gap: 8px;
+        }
+        .input-row input {
+            flex: 1;
+            padding: 12px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            outline: none;
+            letter-spacing: 1px;
+        }
+        .input-row input:focus {
+            border-color: #1a73e8;
+        }
+
+        /* 按鈕樣式 */
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+        button {
+            padding: 12px;
+            border: none;
+            border-radius: 6px;
+            font-size: 15px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s, opacity 0.2s;
+        }
+        button:active {
+            opacity: 0.8;
+        }
+        .btn-verify {
+            background-color: #1a73e8;
+            color: white;
+            white-space: nowrap;
+        }
+        .btn-camera {
+            flex: 1;
+            background-color: #4b5563;
+            color: white;
+        }
+        .btn-upload {
+            flex: 1;
+            background-color: #10b981;
+            color: white;
+        }
+
+        /* 鏡頭掃描區域 */
+        #reader {
+            width: 100%;
+            margin-top: 15px;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        /* 結果顯示卡片 */
+        .result-card {
+            margin-top: 20px;
+            padding: 16px;
+            border-radius: 8px;
+            display: none;
+        }
+        .result-card.success {
+            background-color: #ecfdf5;
+            border: 1px solid #a7f3d0;
+            color: #065f46;
+        }
+        .result-card.error {
+            background-color: #fef2f2;
+            border: 1px solid #fecaca;
+            color: #991b1b;
+        }
+        .result-card h4 {
+            margin: 0 0 8px 0;
+            font-size: 16px;
+        }
+        .result-detail {
+            font-size: 14px;
+            line-height: 1.6;
+            word-break: break-all;
+        }
+
+        /* 備註說明區 */
+        .info-box {
+            margin-top: 20px;
+            padding: 12px;
+            background-color: #f8fafc;
+            border-left: 4px solid #94a3b8;
+            font-size: 13px;
+            color: #475569;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Code 128 條碼驗證與掃描器</h2>
+
+    <!-- 1. 手動輸入區域 -->
+    <div class="input-group">
+        <label for="barcode-input">手動輸入 20 碼條碼：</label>
+        <div class="input-row">
+            <input type="text" id="barcode-input" placeholder="請輸入20位數字條碼" maxlength="20">
+            <button class="btn-verify" onclick="handleManualInput()">驗證條碼</button>
+        </div>
+    </div>
+
+    <!-- 2. 操作按鈕區 -->
+    <div class="btn-group">
+        <button class="btn-camera" onclick="startCamera()">📷 相機掃描</button>
+        <button class="btn-upload" onclick="document.getElementById('barcode-file-input').click()">🖼️ 選取照片辨識</button>
+    </div>
+
+    <!-- 隱藏的照片選擇器 -->
+    <input type="file" id="barcode-file-input" accept="image/*" style="display: none;" onchange="handleFileSelect(event)">
+
+    <!-- 鏡頭即時顯示區 -->
+    <div id="reader"></div>
+
+    <!-- 判定結果顯示區 -->
+    <div id="result-box" class="result-card">
+        <h4 id="result-title"></h4>
+        <div id="result-detail" class="result-detail"></div>
+    </div>
+
+    <!-- 說明標籤 -->
+    <div class="info-box">
+        <strong>說明：</strong> 本工具採用標準 Modulus 10 演算法（奇數位權重 3、偶數位置權重 1）。可使用手動輸入、鏡頭掃描或選取照片對 20 碼條碼進行驗證。
+    </div>
+</div>
+
+<script>
+    let html5QrCode = null;
+
+    // --- Modulus 10 第20碼驗證碼計算函式 ---
+    function validateModulus10(barcode) {
+        barcode = barcode.trim();
+
+        // 檢查長度與格式
+        if (barcode.length !== 20 || !/^\d+$/.test(barcode)) {
+            return {
+                isValid: false,
+                message: `格式錯誤：請輸入完整的 20 位純數字條碼（目前長度：${barcode.length} 碼）。`
+            };
+        }
+
+        let sum = 0;
+        // 計算前 19 碼的權重和
+        for (let i = 0; i < 19; i++) {
+            let digit = parseInt(barcode[i], 10);
+            let position = i + 1; // 1-based 位置
+            
+            // 奇數位置權重 3，偶數位置權重 1
+            if (position % 2 !== 0) {
+                sum += digit * 3;
+            } else {
+                sum += digit * 1;
+            }
+        }
+
+        // 計算標準驗證碼: (10 - (sum % 10)) % 10
+        let calculatedCheckDigit = (10 - (sum % 10)) % 10;
+        let actualCheckDigit = parseInt(barcode[19], 10);
+
+        if (calculatedCheckDigit === actualCheckDigit) {
+            return {
+                isValid: true,
+                calculatedCheckDigit: calculatedCheckDigit,
+                actualCheckDigit: actualCheckDigit,
+                message: `驗證成功！Calculated = ${calculatedCheckDigit}, Actual = ${actualCheckDigit}`
+            };
+        } else {
+            return {
+                isValid: false,
+                calculatedCheckDigit: calculatedCheckDigit,
+                actualCheckDigit: actualCheckDigit,
+                message: `驗證碼不相符！第 20 碼應為【${calculatedCheckDigit}】，但條碼為【${actualCheckDigit}】。`
+            };
+        }
+    }
+
+    // --- 顯示結果 UI ---
+    function displayResult(barcode, validation) {
+        const resultBox = document.getElementById('result-box');
+        const resultTitle = document.getElementById('result-title');
+        const resultDetail = document.getElementById('result-detail');
+
+        resultBox.style.display = 'block';
+
+        if (validation.isValid) {
+            resultBox.className = 'result-card success';
+            resultTitle.innerText = '✅ 驗證通過';
+            resultDetail.innerHTML = `
+                <b>條碼號碼：</b> ${barcode}<br>
+                <b>計算驗證碼：</b> ${validation.calculatedCheckDigit}<br>
+                <b>實際驗證碼：</b> ${validation.actualCheckDigit}
+            `;
+        } else {
+            resultBox.className = 'result-card error';
+            resultTitle.innerText = '❌ 驗證失敗 / 條碼有誤';
+            resultDetail.innerHTML = `
+                <b>讀取條碼：</b> ${barcode}<br>
+                <b>錯誤訊息：</b> ${validation.message}
+            `;
+        }
+    }
+
+    // --- 1. 手動輸入觸發事件 ---
+    function handleManualInput() {
+        stopCameraIfRunning();
+        const inputVal = document.getElementById('barcode-input').value.trim();
+        const validation = validateModulus10(inputVal);
+        displayResult(inputVal, validation);
+    }
+
+    // --- 2. 核心處理函數：接收到的條碼值 (無論是掃描、圖片還是輸入) ---
+    function processScannedBarcode(decodedText) {
+        // 同步填入輸入框方便使用者查看
+        document.getElementById('barcode-input').value = decodedText;
+        
+        // 進行 20 碼 Modulus 10 檢查
+        const validation = validateModulus10(decodedText);
+        displayResult(decodedText, validation);
+    }
+
+    // --- 取得/初始化 Html5Qrcode 實例 ---
+    function getQrInstance() {
+        if (!html5QrCode) {
+            html5QrCode = new Html5Qrcode("reader");
+        }
+        return html5QrCode;
+    }
+
+    async function stopCameraIfRunning() {
+        if (html5QrCode && html5QrCode.isScanning) {
+            await html5QrCode.stop().catch(err => console.error("停止相機失敗", err));
+        }
+    }
+
+    // --- 3. 相機掃描啟動 ---
+    async function startCamera() {
+        const qrInstance = getQrInstance();
+        await stopCameraIfRunning();
+
+        const config = {
+            fps: 15,
+            qrbox: { width: 280, height: 100 },
+            formatsToSupport: [ Html5QrcodeSupportedFormats.CODE_128 ]
+        };
+
+        qrInstance.start(
+            { facingMode: "environment" },
+            config,
+            (decodedText) => {
+                stopCameraIfRunning();
+                processScannedBarcode(decodedText);
+            },
+            (errorMessage) => { /* 掃描中未偵測到條碼時可忽略 */ }
+        ).catch(err => {
+            alert("無法開啟相機：" + err);
+        });
+    }
+
+    // --- 4. 選取照片辨識觸發 ---
+    async function handleFileSelect(event) {
+        const files = event.target.files;
+        if (files.length === 0) return;
+
+        const imageFile = files[0];
+        const qrInstance = getQrInstance();
+        await stopCameraIfRunning();
+
+        qrInstance.scanFile(imageFile, true)
+            .then(decodedText => {
+                processScannedBarcode(decodedText);
+            })
+            .catch(err => {
+                displayResult(
+                    "無法辨識",
+                    { isValid: false, message: "照片中未偵測到清晰的 Code 128 條碼，請確認照片條碼清晰且無反光。" }
+                );
+            })
+            .finally(() => {
+                event.target.value = ""; // 重置 input 以利重複選擇
+            });
+    }
+</script>
+
+</body>
+</html>
