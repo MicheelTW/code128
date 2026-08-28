@@ -3,9 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Code 128 (Mod 10) 第 20 碼驗證碼與條碼產生器</title>
-    <!-- 引入 JsBarcode 函式庫 -->
+    <title>Code 128 (Mod 10) 第 20 碼驗證碼產生與掃描驗證器</title>
+    <!-- 引入 JsBarcode 繪製條碼 -->
     <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+    <!-- 引入 html5-qrcode 進行相機鏡頭條碼掃描 -->
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <style>
         :root {
             --primary-color: #2b5c8f;
@@ -95,14 +97,19 @@
             font-family: sans-serif;
         }
 
+        .btn-group {
+            display: flex;
+            gap: 10px;
+        }
+
         button {
-            width: 100%;
+            flex: 1;
             padding: 12px;
             background-color: var(--primary-color);
             color: white;
             border: none;
             border-radius: 6px;
-            font-size: 16px;
+            font-size: 15px;
             font-weight: bold;
             cursor: pointer;
             transition: background-color 0.2s;
@@ -110,6 +117,14 @@
 
         button:hover {
             background-color: var(--primary-hover);
+        }
+
+        button.scan-btn {
+            background-color: #4a5568;
+        }
+
+        button.scan-btn:hover {
+            background-color: #2d3748;
         }
 
         .result-box {
@@ -170,6 +185,93 @@
             display: none;
         }
 
+        /* 模態彈窗 Modal 樣式 */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .modal-card {
+            background: #ffffff;
+            width: 90%;
+            max-width: 480px;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+            position: relative;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+        }
+
+        .modal-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 24px;
+            color: #888;
+            cursor: pointer;
+            width: auto;
+            padding: 0 8px;
+        }
+
+        #reader {
+            width: 100%;
+            border-radius: 8px;
+            overflow: hidden;
+            background-color: #000;
+        }
+
+        .scan-result-card {
+            margin-top: 15px;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            display: none;
+            line-height: 1.6;
+        }
+
+        .scan-result-card.success {
+            display: block;
+            background-color: #e8f5e9;
+            border: 1px solid #c8e6c9;
+            color: #2e7d32;
+        }
+
+        .scan-result-card.error {
+            display: block;
+            background-color: #ffebee;
+            border: 1px solid #ffcdd2;
+            color: #c62828;
+        }
+
         .info-card {
             margin-top: 20px;
             padding: 12px 15px;
@@ -196,7 +298,10 @@
         <div class="error-msg" id="errorMsg">請輸入剛好 19 位數字！</div>
     </div>
 
-    <button id="calcBtn">自動計算第 20 碼並繪製條碼</button>
+    <div class="btn-group">
+        <button id="calcBtn">自動計算第 20 碼並繪製條碼</button>
+        <button id="openScannerBtn" class="scan-btn">📷 掃描驗證條碼</button>
+    </div>
 
     <div class="result-box" id="resultBox">
         <div class="result-item">
@@ -216,7 +321,19 @@
     </div>
 
     <div class="info-card">
-        <strong>說明：</strong> 本工具採用標準 Modulus 10 演算法計算第 20 位檢查碼，並即時以 Code 128 格式繪製可掃描之條碼影像。
+        <strong>說明：</strong> 本工具採用標準 Modulus 10 演算法（奇數位權重 3、偶數位權重 1）。可使用手動輸入或開啟相機掃描 20 碼條碼進行驗證。
+    </div>
+</div>
+
+<!-- 相機掃描視窗 Modal -->
+<div class="modal-overlay" id="scannerModal">
+    <div class="modal-card">
+        <div class="modal-header">
+            <div class="modal-title">掃描 20 碼條碼</div>
+            <button class="close-btn" id="closeModalBtn">&times;</button>
+        </div>
+        <div id="reader"></div>
+        <div class="scan-result-card" id="scanResultCard"></div>
     </div>
 </div>
 
@@ -229,8 +346,15 @@
     const fullBarcodeValEl = document.getElementById('fullBarcodeVal');
     const calcBtn = document.getElementById('calcBtn');
 
+    // Modal 與 掃描器 DOM
+    const openScannerBtn = document.getElementById('openScannerBtn');
+    const closeModalBtn = document.getElementById('closeModalBtn');
+    const scannerModal = document.getElementById('scannerModal');
+    const scanResultCard = document.getElementById('scanResultCard');
+
+    let html5QrCode = null;
+
     inputEl.addEventListener('input', function() {
-        // 只允許輸入數字
         this.value = this.value.replace(/\D/g, '');
         const len = this.value.length;
         charCountEl.textContent = `${len}/19`;
@@ -253,17 +377,16 @@
         }
     });
 
+    // Modulus 10 驗證碼計算
     function calculateMod10(digit19) {
         let sum = 0;
-        // 由右至左計算加權 (奇數位*3, 偶數位*1)
         for (let i = 0; i < 19; i++) {
             let num = parseInt(digit19.charAt(18 - i), 10);
             let weight = (i % 2 === 0) ? 3 : 1;
             sum += num * weight;
         }
         let remainder = sum % 10;
-        let checkDigit = (10 - remainder) % 10;
-        return checkDigit;
+        return (10 - remainder) % 10;
     }
 
     function calculateAndRender() {
@@ -277,7 +400,6 @@
         fullBarcodeValEl.textContent = fullBarcode;
         resultBoxEl.classList.add('active');
 
-        // 使用 JsBarcode 繪製 Code 128 條碼
         JsBarcode("#barcode", fullBarcode, {
             format: "CODE128",
             lineColor: "#000",
@@ -287,6 +409,92 @@
             fontSize: 16,
             margin: 10
         });
+    }
+
+    // 開啟相機掃描小視窗
+    openScannerBtn.addEventListener('click', async function() {
+        scannerModal.classList.add('active');
+        scanResultCard.className = 'scan-result-card';
+        scanResultCard.style.display = 'none';
+
+        if (!html5QrCode) {
+            html5QrCode = new Html5Qrcode("reader");
+        }
+
+        try {
+            // 指定優先調用後置鏡頭 (environment)
+            await html5QrCode.start(
+                { facingMode: "environment" },
+                {
+                    fps: 10,
+                    qrbox: { width: 300, height: 120 }
+                },
+                onScanSuccess,
+                onScanFailure
+            );
+        } catch (err) {
+            scanResultCard.className = 'scan-result-card error';
+            scanResultCard.innerHTML = `<strong>無法開啟相機：</strong> ${err.message || err}`;
+            scanResultCard.style.display = 'block';
+        }
+    });
+
+    // 關閉相機視窗
+    async function stopScanner() {
+        if (html5QrCode && html5QrCode.isScanning) {
+            await html5QrCode.stop();
+        }
+        scannerModal.classList.remove('active');
+    }
+
+    closeModalBtn.addEventListener('click', stopScanner);
+
+    // 掃描成功處理邏輯
+    function onScanSuccess(decodedText, decodedResult) {
+        const barcodeText = decodedText.trim();
+        scanResultCard.style.display = 'block';
+
+        // 檢查是否為 20 位純數字
+        if (!/^\d{20}$/.test(barcodeText)) {
+            scanResultCard.className = 'scan-result-card error';
+            scanResultCard.innerHTML = `
+                <strong>掃描結果：</strong> <code>${barcodeText}</code><br>
+                <strong>格式不符：</strong> 請掃描長度為 20 位的數字條碼！
+            `;
+            return;
+        }
+
+        // 取出前 19 碼與掃描到的第 20 碼
+        const digit19 = barcodeText.substring(0, 19);
+        const scannedCheckDigit = parseInt(barcodeText.charAt(19), 10);
+
+        // 計算正確驗證碼
+        const correctCheckDigit = calculateMod10(digit19);
+
+        if (scannedCheckDigit === correctCheckDigit) {
+            scanResultCard.className = 'scan-result-card success';
+            scanResultCard.innerHTML = `
+                <strong>條碼內容：</strong> <code>${barcodeText}</code><br>
+                <strong>驗證結果：</strong> ✅ 驗證碼正確 (第 20 碼為 ${scannedCheckDigit})
+            `;
+
+            // 自動將前 19 碼帶入主畫面並同步繪製
+            inputEl.value = digit19;
+            charCountEl.textContent = '19/19';
+            calculateAndRender();
+        } else {
+            scanResultCard.className = 'scan-result-card error';
+            scanResultCard.innerHTML = `
+                <strong>條碼內容：</strong> <code>${barcodeText}</code><br>
+                <strong>驗證結果：</strong> ❌ 此條碼驗證碼錯誤！<br>
+                掃描到的第 20 碼為：<strong>${scannedCheckDigit}</strong><br>
+                正確的驗證碼應為：<strong>${correctCheckDigit}</strong>
+            `;
+        }
+    }
+
+    function onScanFailure(error) {
+        // 掃描尋找中的過程，靜態忽略不處理
     }
 </script>
 
