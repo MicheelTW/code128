@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code 128 第20碼驗證碼與條碼產生器</title>
+    <!-- 引入 html5-qrcode 程式庫 -->
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+        }
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+        button {
+            flex: 1;
+            min-width: 140px;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn-camera {
+            background-color: #1a73e8;
+            color: white;
+        }
+        .btn-camera:hover {
+            background-color: #1557b0;
+        }
+        .btn-upload {
+            background-color: #34a853;
+            color: white;
+        }
+        .btn-upload:hover {
+            background-color: #2d8e47;
+        }
+        #reader {
+            width: 100%;
+            margin-top: 15px;
+        }
+        #result {
+            margin-top: 20px;
+            padding: 12px;
+            background-color: #e8f0fe;
+            border-radius: 6px;
+            word-break: break-all;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Code 128 條碼掃描與驗證</h2>
+    
+    <div class="btn-group">
+        <!-- 1. 開啟鏡頭即時掃描 -->
+        <button class="btn-camera" onclick="startCamera()">📷 開啟相機掃描</button>
+        
+        <!-- 2. 選取照片 / 拍照辨識按鈕 -->
+        <button class="btn-upload" onclick="document.getElementById('barcode-file-input').click()">🖼️ 選取照片辨識</button>
+    </div>
+
+    <!-- 隱藏的檔案選擇器 (只支援圖片) -->
+    <input type="file" id="barcode-file-input" accept="image/*" style="display: none;" onchange="handleFileSelect(event)">
+
+    <!-- 鏡頭即時預覽區域 -->
+    <div id="reader"></div>
+
+    <!-- 辨識結果顯示區 -->
+    <div id="result">
+        <strong>辨識結果：</strong> <span id="scanned-code"></span>
+    </div>
+</div>
+
+<script>
+    let html5QrCode = null;
+
+    // 初始化 Html5Qrcode 物件
+    function getQrInstance() {
+        if (!html5QrCode) {
+            html5QrCode = new Html5Qrcode("reader");
+        }
+        return html5QrCode;
+    }
+
+    // 成功辨識時的處理邏輯
+    function onScanSuccess(decodedText, decodedResult) {
+        document.getElementById('result').style.display = 'block';
+        document.getElementById('scanned-code').innerText = decodedText;
+        
+        // 停止即時相機掃描（如果是從相機啟動的）
+        if (html5QrCode && html5QrCode.isScanning) {
+            html5QrCode.stop().catch(err => console.error("停止相機失敗", err));
+        }
+        alert("成功讀取條碼：\n" + decodedText);
+    }
+
+    // --- 1. 開啟相機即時掃描 ---
+    async function startCamera() {
+        const qrInstance = getQrInstance();
+        
+        // 如果正在掃描則先停止
+        if (qrInstance.isScanning) {
+            await qrInstance.stop();
+        }
+
+        const config = {
+            fps: 15,
+            qrbox: { width: 280, height: 100 }, // 設定長方形框以利 1D 條碼對焦
+            formatsToSupport: [ Html5QrcodeSupportedFormats.CODE_128 ] // 限定 Code 128 提升 iOS 辨識率
+        };
+
+        qrInstance.start(
+            { facingMode: "environment" }, // 使用後鏡頭
+            config,
+            onScanSuccess,
+            (errorMessage) => { /* 掃描過程中的幀未匹配可忽視 */ }
+        ).catch(err => {
+            alert("無法開啟相機：" + err);
+        });
+    }
+
+    // --- 2. 選取照片進行辨識 ---
+    async function handleFileSelect(event) {
+        const files = event.target.files;
+        if (files.length === 0) return;
+
+        const imageFile = files[0];
+        const qrInstance = getQrInstance();
+
+        // 若相機正在運行，先停止相機
+        if (qrInstance.isScanning) {
+            await qrInstance.stop();
+        }
+
+        // 使用 html5QrCode.scanFile 讀取上傳的圖片檔案
+        qrInstance.scanFile(imageFile, true)
+            .then(decodedText => {
+                onScanSuccess(decodedText);
+            })
+            .catch(err => {
+                alert("無法辨識照片中的條碼！\n請確定圖片中的 Code 128 條碼清晰且光線充足。");
+            })
+            .finally(() => {
+                // 清空 input，允許重複選取相同檔案
+                event.target.value = "";
+            });
+    }
+</script>
+
+</body>
+</html>
